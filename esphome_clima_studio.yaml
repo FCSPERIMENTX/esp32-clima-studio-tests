@@ -1,0 +1,161 @@
+esphome:
+  name: clima-studio
+
+esp32:
+  board: esp32dev
+
+wifi:
+  ssid: "Piano 2"
+  password: "Cudanna1208"
+  reboot_timeout: 15min
+
+api:
+
+ota:
+  - platform: esphome
+
+logger:
+  level: INFO
+
+# --------------------------------------------------
+# BUS I2C (Sensore Temp/Umidità SHT41 su GPIO21/22)
+# --------------------------------------------------
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+# --------------------------------------------------
+# BUS UART (Sensore Radar HMMD 24GHz / LD2410)
+# --------------------------------------------------
+uart:
+  id: uart_radar
+  tx_pin: GPIO26
+  rx_pin: GPIO25
+  baud_rate: 9600  # ✓ BAUD RATE CORRETTO
+
+ld2410:
+  id: radar_hmmd
+  timeout: 5min
+
+# --------------------------------------------------
+# CONDIZIONATORE MIDEA IR (GPIO14)
+# --------------------------------------------------
+remote_transmitter:
+  pin: GPIO14
+  carrier_duty_percent: 50%
+
+climate:
+  - platform: midea_ir
+    name: "Condizionatore Studio"
+    supports_heat: false
+    supports_cool: true
+    visual:
+      min_temperature: 17
+      max_temperature: 30
+      temperature_step: 1
+
+# --------------------------------------------------
+# STRISCIA LED PWM 24V (GPIO17 - FUNZIONANTE)
+# --------------------------------------------------
+output:
+  - platform: ledc
+    pin: GPIO17
+    id: output_led_24v
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    name: "Striscia LED 24V Studio"
+    id: rele_led_24v
+    output: output_led_24v
+    default_transition_length: 1s
+
+# --------------------------------------------------
+# SENSORE SHT41 - MONITORAGGIO TEMPERATURA
+# --------------------------------------------------
+sensor:
+  - platform: sht4x
+    temperature:
+      name: "Temperatura Studio"
+      id: temp_studio
+      unit_of_measurement: "°C"
+      accuracy_decimals: 1
+    humidity:
+      name: "Umidità Studio"
+      id: humidity_studio
+      unit_of_measurement: "%"
+      accuracy_decimals: 1
+    address: 0x44
+    update_interval: 30s  # Leggi ogni 30 secondi
+
+  # SENSORI RADAR LD2410
+  - platform: ld2410
+    detection_distance:
+      name: "Distanza Rilevata Radar"
+    moving_distance:
+      name: "Distanza Movimento"
+    still_distance:
+      name: "Distanza Presenza Statica"
+
+# --------------------------------------------------
+# SENSORI BINARI - MOVIMENTO E CONTROLLI
+# --------------------------------------------------
+binary_sensor:
+  # Radar
+  - platform: ld2410
+    has_target:
+      name: "Presenza Radar Studio"
+      id: radar_presenza
+      device_class: occupancy
+      filters:
+        - delayed_off: 5s
+    has_moving_target:
+      name: "Movimento in Corso"
+    has_still_target:
+      name: "Presenza Statica (Fermo)"
+
+  # Bottone GPIO19
+  - platform: gpio
+    pin:
+      number: GPIO19
+      mode: INPUT_PULLUP
+    id: bottone_selettore
+    name: "Bottone Selettore Luce"
+    on_press:
+      then:
+        - light.toggle: rele_led_24v
+
+  # Interruttore GPIO18
+  - platform: gpio
+    pin:
+      number: GPIO18
+      mode: INPUT_PULLUP
+    id: interruttore_fisico
+    name: "Interruttore Fisico LED 24V"
+    on_press:
+      then:
+        - light.toggle: rele_led_24v
+
+# --------------------------------------------------
+# SENSORI DI TESTO - STATI E DEBUG
+# --------------------------------------------------
+text_sensor:
+  - platform: template
+    name: "Stato LED 24V"
+    lambda: |-
+      if (id(rele_led_24v).remote_values.is_on()) {
+        return {"ON - " + std::to_string((int)(id(rele_led_24v).remote_values.get_brightness() * 100)) + "%"};
+      } else {
+        return {"OFF"};
+      }
+    update_interval: 1s
+
+  - platform: template
+    name: "Temperatura Lettura"
+    lambda: |-
+      if (id(temp_studio).has_state()) {
+        return {std::to_string((int)id(temp_studio).state) + "°C"};
+      }
+      return {"N/A"};
+    update_interval: 5s
